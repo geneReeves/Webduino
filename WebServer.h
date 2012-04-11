@@ -155,8 +155,10 @@ public:
   //          the registered command table.
   // tail_complete is true if the complete URL fit in url_tail,  false if
   //          part of it was lost because the buffer was too small.
+  // keep_alive: if set to true, Webduino will not close the connection
+  // 		and it is user responsibility to close it.
   typedef void Command(WebServer &server, ConnectionType type,
-                       char *url_tail, bool tail_complete);
+                       char *url_tail, bool tail_complete, bool *keep_alive);
 
   // constructor for webserver object
   WebServer(const char *urlPrefix = "", int port = 80);
@@ -267,6 +269,10 @@ public:
   // refresh the page without getting a "resubmit form" dialog.
   void httpSeeOther(const char *otherURL);
 
+  // used for keep_alive connections
+  // returns current client
+  EthernetClient &getActiveClient() { return m_client; }
+  
   // implementation of write used to implement Print interface
   virtual size_t write(uint8_t);
   virtual size_t write(const char *str);
@@ -297,7 +303,7 @@ private:
   void reset();
   void getRequest(WebServer::ConnectionType &type, char *request, int *length);
   bool dispatchCommand(ConnectionType requestType, char *verb,
-                       bool tail_complete);
+                       bool tail_complete, bool *keep_alive);
   void processHeaders();
   void outputCheckboxOrRadio(const char *element, const char *name,
                              const char *val, const char *label,
@@ -423,7 +429,7 @@ void WebServer::printCRLF()
 }
 
 bool WebServer::dispatchCommand(ConnectionType requestType, char *verb,
-        bool tail_complete)
+        bool tail_complete, bool *keep_alive)
 {
   // if there is no URL, i.e. we have a prefix and it's requested without a 
   // trailing slash or if the URL is just the slash
@@ -465,7 +471,7 @@ bool WebServer::dispatchCommand(ConnectionType requestType, char *verb,
         // mark, if present) when passing it to the "action" routine
         m_commands[i].cmd(*this, requestType,
         verb + verb_len + qm_offset,
-        tail_complete);
+        tail_complete, keep_alive);
         return true;
       }
     }
@@ -484,7 +490,9 @@ void WebServer::processConnection()
 void WebServer::processConnection(char *buff, int *bufflen)
 {
   int urlPrefixLen = strlen(m_urlPrefix);
-
+  
+  bool keep_alive = false;
+  
   m_client = m_server.available();
 
   if (m_client) {
@@ -527,7 +535,7 @@ void WebServer::processConnection(char *buff, int *bufflen)
     if      (requestType == INVALID ||
              strncmp(buff, m_urlPrefix, urlPrefixLen) != 0 ||
              !dispatchCommand(requestType, buff + urlPrefixLen,
-                              (*bufflen) >= 0))
+                              (*bufflen) >= 0, &keep_alive))
     {
       m_failureCmd(*this, requestType, buff, (*bufflen) >= 0);
     }
@@ -535,7 +543,8 @@ void WebServer::processConnection(char *buff, int *bufflen)
 #if WEBDUINO_SERIAL_DEBUGGING > 1
     Serial.println("*** stopping connection ***");
 #endif
-    reset();
+	if (!keep_alive)
+		reset();
   }
 }
 
